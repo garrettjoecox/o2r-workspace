@@ -1,31 +1,19 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { FileUpload } from "@/components/file-upload"
 import { MessageList } from "@/components/message-list"
 import { MessageEditor } from "@/components/message-editor"
 import { parseMessages, type MessageEntry, messageToBlob, messagesToBlob } from "@/lib/message-parser"
 import { FileCode2, Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import JSZip from "jszip"
 
 export default function Home() {
   const [messages, setMessages] = useState<MessageEntry[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [filename, setFilename] = useState<string>("")
   const [selectedForExport, setSelectedForExport] = useState<Set<number>>(new Set())
-
-  useEffect(() => {
-    // Load default binary file on mount
-    fetch("/nes_message_data_static")
-      .then((response) => response.arrayBuffer())
-      .then((arrayBuffer) => {
-        const uint8Array = new Uint8Array(arrayBuffer)
-        handleFileLoad(uint8Array, "nes_message_data_static")
-      })
-      .catch((error) => {
-        console.error("Failed to load default message data:", error)
-      })
-  }, [])
 
   const handleFileLoad = (data: Uint8Array, name: string) => {
     const parsed = parseMessages(data)
@@ -38,15 +26,24 @@ export default function Home() {
     }
   }
 
-  const handleExportSelected = () => {
+  const handleExportSelected = async () => {
     const messagesToExport = messages.filter(m => selectedForExport.has(m.id))
     if (messagesToExport.length === 0) return
     
     const blob = messagesToBlob(messagesToExport)
-    const url = URL.createObjectURL(blob)
+    const binaryData = await blob.arrayBuffer()
+    
+    // Create a zip file with the proper structure
+    const zip = new JSZip()
+    zip.file("override/text/nes_message_data_static/nes_message_data_static", binaryData)
+    
+    // Generate the zip file
+    const zipBlob = await zip.generateAsync({ type: "blob" })
+    
+    const url = URL.createObjectURL(zipBlob)
     const a = document.createElement("a")
     a.href = url
-    a.download = filename || "messages.bin"
+    a.download = "messageOverrides.o2r"
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -91,7 +88,9 @@ export default function Home() {
       </header>
 
       <main className="container mx-auto px-6 py-8">
-        {messages.length > 0 && (
+        {messages.length === 0 ? (
+          <FileUpload onFileLoad={handleFileLoad} />
+        ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-1">
               <div className="mb-4">
