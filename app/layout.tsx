@@ -8,8 +8,8 @@ const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "SoH Message Editor - Binary Message Parser",
-  description: "Parse, browse, and edit binary message files for Ship of Harkinian.",
+  title: "SoH Animation Editor",
+  description: "Use Fast64 C outputs to override animation files for Ship of Harkinian",
 }
 
 export default function RootLayout({
