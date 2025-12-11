@@ -1,243 +1,155 @@
 "use client"
 
-import { useState } from "react"
-import { FileUpload } from "@/components/file-upload"
-import { AnimationList } from "@/components/animation-list"
-import { AnimationEditor } from "@/components/animation-editor"
-import { parseAnimationFromC, combineAnimationFiles, type AnimationEntry, animationDataToBlob, animationHeaderToBlob, animationToC } from "@/lib/animation-parser"
-import { FileCode2, Download } from "lucide-react"
+import { useState, useCallback } from "react"
+import { parseO2RArchive, type ResourceEntry } from "@/lib/o2r-parser"
+import { ResourceTree } from "@/components/resource-tree"
+import { HexViewer } from "@/components/hex-viewer"
+import { FileCode2, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import JSZip from "jszip"
+import { Card, CardContent } from "@/components/ui/card"
 
 export default function Home() {
-  const [step, setStep] = useState<"select" | "upload" | "edit">("select")
-  const [selectedAnimationName, setSelectedAnimationName] = useState<string>("")
-  const [animation, setAnimation] = useState<AnimationEntry | null>(null)
-  const [filename, setFilename] = useState<string>("")
-  const [uploadedFiles, setUploadedFiles] = useState<{ data?: string; header?: string }>({})
+  const [resources, setResources] = useState<ResourceEntry[]>([])
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const handleAnimationSelect = (animationName: string) => {
-    setSelectedAnimationName(animationName)
-    setStep("upload")
-  }
+  const handleFileSelect = useCallback(async (file: File) => {
+    setIsLoading(true)
+    setError(null)
+    setResources([])
+    setSelectedPath(null)
 
-  const handleFileLoad = (data: string, name: string) => {
     try {
-      const parsed = parseAnimationFromC(data)
-      // Override the animation name with the selected one
-      parsed.name = selectedAnimationName
-      setAnimation(parsed)
-      setFilename(name)
-      setUploadedFiles({}) // Reset uploaded files
-      setStep("edit")
-    } catch (error) {
-      alert("Error parsing animation: " + (error instanceof Error ? error.message : "Unknown error"))
+      const parsedResources = await parseO2RArchive(file)
+      setResources(parsedResources)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to parse O2R file")
+      console.error("Error parsing O2R:", err)
+    } finally {
+      setIsLoading(false)
     }
-  }
+  }, [])
 
-  const handlePartialFileLoad = (data: string, name: string, type: 'data' | 'header') => {
-    const newUploadedFiles = { ...uploadedFiles, [type]: data }
-    setUploadedFiles(newUploadedFiles)
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
 
-    // If we now have both files, combine them
-    if (newUploadedFiles.data && newUploadedFiles.header) {
-      try {
-        const parsed = combineAnimationFiles(newUploadedFiles.data, newUploadedFiles.header)
-        // Override the animation name with the selected one
-        parsed.name = selectedAnimationName
-        setAnimation(parsed)
-        setFilename(name)
-        setUploadedFiles({}) // Reset uploaded files
-        setStep("edit")
-      } catch (error) {
-        alert("Error combining animation files: " + (error instanceof Error ? error.message : "Unknown error"))
-      }
+    const file = e.dataTransfer.files[0]
+    if (file) {
+      handleFileSelect(file)
     }
-  }
+  }, [handleFileSelect])
 
-  const handleBack = () => {
-    if (step === "upload") {
-      setStep("select")
-      setSelectedAnimationName("")
-      setUploadedFiles({})
-    } else if (step === "edit") {
-      setStep("upload")
-      setAnimation(null)
-      setFilename("")
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
+  const handleFileInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      handleFileSelect(file)
     }
-  }
+  }, [handleFileSelect])
 
-  const handleExport = async () => {
-    if (!animation) return
-    
-    if (animation.type === "link") {
-      // Link animation export
-      const dataFileName = animation.name.replace(/^gPlayerAnim_/, "gPlayerAnimData_")
-      const dataPath = `__OTR__objects/gameplay_keep/${dataFileName}`
-      
-      // Create binary files
-      const dataBlob = animationDataToBlob(animation, dataFileName)
-      const headerBlob = animationHeaderToBlob(animation, dataPath)
-      
-      const dataBuffer = await dataBlob.arrayBuffer()
-      const headerBuffer = await headerBlob.arrayBuffer()
-      
-      // Create a zip file with the proper structure
-      const zip = new JSZip()
-      zip.file(`objects/gameplay_keep/${animation.name}`, headerBuffer)
-      zip.file(`objects/gameplay_keep/${dataFileName}`, dataBuffer)
-      
-      // Generate the zip file
-      const zipBlob = await zip.generateAsync({ type: "blob" })
-      
-      const url = URL.createObjectURL(zipBlob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `${animation.name}.o2r`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-    } else {
-      // Actor animation export (single file)
-      const animBlob = animationDataToBlob(animation, animation.name)
-      const animBuffer = await animBlob.arrayBuffer()
-      
-      const zip = new JSZip()
-      zip.file(`animations/${animation.name}`, animBuffer)
-      
-      const zipBlob = await zip.generateAsync({ type: "blob" })
-      
-      const url = URL.createObjectURL(zipBlob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `${animation.name}.o2r`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-    }
-  }
+  const handleResourceSelect = useCallback((path: string) => {
+    setSelectedPath(path)
+  }, [])
 
-  const handleExportC = async () => {
-    if (!animation) return
-    
-    const cSource = animationToC(animation)
-    const blob = new Blob([cSource], { type: "text/plain" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `${animation.name}.c`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
-
-  const handleUpdateAnimation = (updatedAnimation: AnimationEntry) => {
-    setAnimation(updatedAnimation)
-  }
+  const selectedResource = resources.find(r => r.path === selectedPath)
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       <header className="border-b border-border bg-card">
         <div className="container mx-auto px-6 py-4">
           <div className="flex items-center gap-3">
             <FileCode2 className="w-8 h-8 text-primary" />
             <div>
-              <h1 className="text-2xl font-bold text-foreground">SoH Animation Editor</h1>
-              <p className="text-sm text-muted-foreground">Use Fast64 C outputs to override Link and Actor animation files for Ship of Harkinian</p>
+              <h1 className="text-2xl font-bold text-foreground">O2R Resource Editor</h1>
+              <p className="text-sm text-muted-foreground">
+                Browse and inspect Ship of Harkinian resource files
+              </p>
             </div>
           </div>
         </div>
       </header>
 
-      <main className="container mx-auto px-6 py-8">
-        {step === "select" && (
-          <AnimationList onSelect={handleAnimationSelect} />
-        )}
-
-        {step === "upload" && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-2xl font-bold text-foreground">Upload Animation Data</h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Selected animation: <span className="font-mono text-primary">{selectedAnimationName}</span>
-                </p>
-              </div>
-              <Button onClick={handleBack} variant="outline">
-                ← Back
-              </Button>
-            </div>
-            <FileUpload 
-              onFileLoad={handleFileLoad} 
-              onPartialFileLoad={handlePartialFileLoad}
-              uploadedFiles={uploadedFiles}
-            />
-          </div>
-        )}
-
-        {step === "edit" && animation && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-1">
-              <div className="mb-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="text-lg font-semibold text-foreground">Animation</h2>
-                  <Button onClick={handleBack} variant="ghost" size="sm">
-                    ← Back
-                  </Button>
-                </div>
-                <p className="text-sm text-muted-foreground mb-1">
-                  Source: {filename}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Export as: <span className="font-mono text-primary">{animation.name}</span>
-                </p>
-                <div className="flex gap-2 mt-3">
-                  <Button 
-                    onClick={handleExport} 
-                    className="flex-1"
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    Export .o2r
-                  </Button>
-                  <Button 
-                    onClick={handleExportC} 
-                    variant="outline"
-                    className="flex-1"
-                  >
-                    <Download className="w-4 h-4 mr-2" />
-                    Export .c
-                  </Button>
-                </div>
-              </div>
-              <Card className="p-4">
-                <h3 className="text-sm font-semibold text-foreground mb-2">Summary</h3>
-                <div className="text-xs text-muted-foreground space-y-1">
-                  <div>Type: {animation.type === "link" ? "Link Animation" : "Actor Animation"}</div>
-                  <div>Frame Count: {animation.frameCount}</div>
-                  {animation.type === "link" ? (
-                    <>
-                      <div>Data Values: {animation.data.length}</div>
-                      <div>Size: {animation.data.length * 2} bytes</div>
-                    </>
-                  ) : (
-                    <>
-                      <div>Frame Data: {animation.frameData.length} values</div>
-                      <div>Joint Count: {animation.jointIndices.length}</div>
-                      <div>Static Index Max: {animation.staticIndexMax}</div>
-                      <div>Size: {animation.frameData.length * 2 + animation.jointIndices.length * 6} bytes</div>
-                    </>
+      <main className="flex-1 flex">
+        {resources.length === 0 ? (
+          <div className="container mx-auto px-6 py-8 h-full flex items-center justify-center">
+            <Card className="w-full max-w-2xl">
+              <CardContent className="pt-6">
+                <div
+                  className="border-2 border-dashed border-border rounded-lg p-12 text-center hover:border-primary/50 transition-colors cursor-pointer"
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onClick={() => document.getElementById('file-input')?.click()}
+                >
+                  <Upload className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+                  <h2 className="text-xl font-semibold mb-2">Drop an O2R file to get started</h2>
+                  <p className="text-muted-foreground mb-4">
+                    or click to browse your files
+                  </p>
+                  {isLoading && (
+                    <p className="text-sm text-primary">Loading...</p>
                   )}
+                  {error && (
+                    <p className="text-sm text-destructive">{error}</p>
+                  )}
+                  <input
+                    id="file-input"
+                    type="file"
+                    accept=".o2r,.otr"
+                    className="hidden"
+                    onChange={handleFileInputChange}
+                  />
                 </div>
-              </Card>
-            </div>
-            <div className="lg:col-span-2">
-              <AnimationEditor animation={animation} onUpdate={handleUpdateAnimation} />
-            </div>
+              </CardContent>
+            </Card>
           </div>
+        ) : (
+          <>
+            {/* Sidebar with resource tree */}
+            <div className="w-80 border-r border-border bg-card flex flex-col">
+              <div className="border-b border-border p-4 flex items-center justify-between">
+                <h2 className="font-semibold">Resources</h2>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setResources([])
+                    setSelectedPath(null)
+                  }}
+                >
+                  Close
+                </Button>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <ResourceTree
+                  resources={resources}
+                  selectedPath={selectedPath}
+                  onResourceSelect={handleResourceSelect}
+                />
+              </div>
+            </div>
+
+            {/* Main content area */}
+            <div className="flex-1 overflow-hidden">
+              {selectedResource ? (
+                <div className="h-full p-6 overflow-auto">
+                  <HexViewer resource={selectedResource} />
+                </div>
+              ) : (
+                <div className="h-full flex items-center justify-center text-muted-foreground">
+                  <div className="text-center">
+                    <FileCode2 className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                    <p>Select a resource from the tree to view its contents</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
         )}
       </main>
     </div>
