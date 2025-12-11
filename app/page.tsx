@@ -71,33 +71,53 @@ export default function Home() {
   const handleExport = async () => {
     if (!animation) return
     
-    // Derive the data file name from animation name
-    const dataFileName = animation.name.replace(/^gPlayerAnim_/, "gPlayerAnimData_")
-    const dataPath = `__OTR__objects/gameplay_keep/${dataFileName}`
-    
-    // Create binary files
-    const dataBlob = animationDataToBlob(animation, dataFileName)
-    const headerBlob = animationHeaderToBlob(animation, dataPath)
-    
-    const dataBuffer = await dataBlob.arrayBuffer()
-    const headerBuffer = await headerBlob.arrayBuffer()
-    
-    // Create a zip file with the proper structure
-    const zip = new JSZip()
-    zip.file(`objects/gameplay_keep/${animation.name}`, headerBuffer)
-    zip.file(`objects/gameplay_keep/${dataFileName}`, dataBuffer)
-    
-    // Generate the zip file
-    const zipBlob = await zip.generateAsync({ type: "blob" })
-    
-    const url = URL.createObjectURL(zipBlob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `${animation.name}.o2r`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    if (animation.type === "link") {
+      // Link animation export
+      const dataFileName = animation.name.replace(/^gPlayerAnim_/, "gPlayerAnimData_")
+      const dataPath = `__OTR__objects/gameplay_keep/${dataFileName}`
+      
+      // Create binary files
+      const dataBlob = animationDataToBlob(animation, dataFileName)
+      const headerBlob = animationHeaderToBlob(animation, dataPath)
+      
+      const dataBuffer = await dataBlob.arrayBuffer()
+      const headerBuffer = await headerBlob.arrayBuffer()
+      
+      // Create a zip file with the proper structure
+      const zip = new JSZip()
+      zip.file(`objects/gameplay_keep/${animation.name}`, headerBuffer)
+      zip.file(`objects/gameplay_keep/${dataFileName}`, dataBuffer)
+      
+      // Generate the zip file
+      const zipBlob = await zip.generateAsync({ type: "blob" })
+      
+      const url = URL.createObjectURL(zipBlob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${animation.name}.o2r`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } else {
+      // Actor animation export (single file)
+      const animBlob = animationDataToBlob(animation, animation.name)
+      const animBuffer = await animBlob.arrayBuffer()
+      
+      const zip = new JSZip()
+      zip.file(`animations/${animation.name}`, animBuffer)
+      
+      const zipBlob = await zip.generateAsync({ type: "blob" })
+      
+      const url = URL.createObjectURL(zipBlob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${animation.name}.o2r`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    }
   }
 
   const handleExportC = async () => {
@@ -127,7 +147,7 @@ export default function Home() {
             <FileCode2 className="w-8 h-8 text-primary" />
             <div>
               <h1 className="text-2xl font-bold text-foreground">SoH Animation Editor</h1>
-              <p className="text-sm text-muted-foreground">Use Fast64 C outputs to override animation files for Ship of Harkinian</p>
+              <p className="text-sm text-muted-foreground">Use Fast64 C outputs to override Link and Actor animation files for Ship of Harkinian</p>
             </div>
           </div>
         </div>
@@ -196,9 +216,21 @@ export default function Home() {
               <Card className="p-4">
                 <h3 className="text-sm font-semibold text-foreground mb-2">Summary</h3>
                 <div className="text-xs text-muted-foreground space-y-1">
+                  <div>Type: {animation.type === "link" ? "Link Animation" : "Actor Animation"}</div>
                   <div>Frame Count: {animation.frameCount}</div>
-                  <div>Data Values: {animation.data.length}</div>
-                  <div>Size: {animation.data.length * 2} bytes</div>
+                  {animation.type === "link" ? (
+                    <>
+                      <div>Data Values: {animation.data.length}</div>
+                      <div>Size: {animation.data.length * 2} bytes</div>
+                    </>
+                  ) : (
+                    <>
+                      <div>Frame Data: {animation.frameData.length} values</div>
+                      <div>Joint Count: {animation.jointIndices.length}</div>
+                      <div>Static Index Max: {animation.staticIndexMax}</div>
+                      <div>Size: {animation.frameData.length * 2 + animation.jointIndices.length * 6} bytes</div>
+                    </>
+                  )}
                 </div>
               </Card>
             </div>

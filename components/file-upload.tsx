@@ -26,19 +26,22 @@ export function FileUpload({ onFileLoad, onPartialFileLoad, uploadedFiles }: Fil
           const text = e.target?.result as string
           
           // Check if it's a complete file or partial file
-          const hasData = /s16\s+\w+\s*\[\s*\]\s*=\s*\{/.test(text)
-          const hasHeader = /LinkAnimationHeader\s+\w+\s*=\s*\{/.test(text)
+          const hasLinkData = /s16\s+\w+\s*\[\s*\]\s*=\s*\{/.test(text)
+          const hasLinkHeader = /LinkAnimationHeader\s+\w+\s*=\s*\{/.test(text)
+          const hasActorFrameData = /s16\s+\w+\s*\[\s*\]\s*=\s*\{/.test(text)
+          const hasActorJointIndices = /JointIndex\s+\w+\s*\[\s*\]\s*=\s*\{/.test(text)
+          const hasActorHeader = /AnimationHeader\s+\w+\s*=\s*\{/.test(text) && !/LinkAnimationHeader/.test(text)
           
-          if (hasData && hasHeader) {
+          if ((hasLinkData && hasLinkHeader) || (hasActorFrameData && hasActorJointIndices && hasActorHeader)) {
             // Complete file - use the original callback
             onFileLoad(text, file.name)
-          } else if (hasData && !hasHeader) {
-            // Data file only
+          } else if (hasLinkData && !hasLinkHeader) {
+            // Link data file only
             if (onPartialFileLoad) {
               onPartialFileLoad(text, file.name, 'data')
             }
-          } else if (!hasData && hasHeader) {
-            // Header file only
+          } else if (!hasLinkData && hasLinkHeader) {
+            // Link header file only
             if (onPartialFileLoad) {
               onPartialFileLoad(text, file.name, 'header')
             }
@@ -103,13 +106,13 @@ export function FileUpload({ onFileLoad, onPartialFileLoad, uploadedFiles }: Fil
             </>
           ) : needsHeaderFile ? (
             <>
-              <p className="text-lg mb-2 text-foreground">Drop the <strong>header file</strong> (.c with LinkAnimationHeader)</p>
+              <p className="text-lg mb-2 text-foreground">Drop the <strong>header file</strong> (.c with animation header)</p>
               <p className="text-sm text-muted-foreground">or click to browse</p>
             </>
           ) : (
             <>
               <p className="text-lg mb-2 text-foreground">Drop a <code className="bg-muted px-1.5 py-0.5 rounded d-inline mx-1">.c</code> animation file</p>
-              <p className="text-sm text-muted-foreground">or click to browse</p>
+              <p className="text-sm text-muted-foreground">Supports Link and Actor animations | or click to browse</p>
             </>
           )}
         </label>
