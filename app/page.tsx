@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { CreatePlayerAnimationDialog } from "@/components/dialogs/CreatePlayerAnimationDialog";
 import { OverwriteDialog } from "@/components/dialogs/OverwriteDialog";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { ResourceTree } from "@/components/resource-tree";
@@ -11,11 +12,14 @@ import { WorkspaceHeader } from "@/components/workspace/WorkspaceHeader";
 import { WorkspaceToolbar } from "@/components/workspace/WorkspaceToolbar";
 import { readUInt32LE } from "@/lib/binary-utils";
 import {
+	combineLinkAnimationFiles,
+	parseAnimationFromC,
 	parseAnimationHeader,
+	splitLinkAnimationToBlobs,
 	updateAnimationHeaderPath,
 } from "@/lib/parsers/animation";
 import { exportO2RArchive, parseO2RArchive } from "@/lib/parsers/o2r";
-import type { ResourceEntry } from "@/lib/types";
+import type { LinkAnimationEntry, ResourceEntry } from "@/lib/types";
 
 export interface O2RFile {
 	filename: string;
@@ -40,6 +44,7 @@ export default function Home() {
 		resource: ResourceEntry | null;
 		additionalResources?: ResourceEntry[];
 	}>({ open: false, resource: null });
+	const [createPlayerAnimDialog, setCreatePlayerAnimDialog] = useState(false);
 
 	// Currently disabled, too buggy
 	// Load workspace from localStorage on mount
@@ -248,6 +253,107 @@ export default function Home() {
 		}
 	}, [workspaceResources]);
 
+	const handleCreatePlayerAnimation = useCallback(
+		async (path: string, files: File[]) => {
+			setError(null);
+
+			try {
+				// Read file contents
+				const fileContents = await Promise.all(
+					files.map((file) => file.text()),
+				);
+
+				let animation: LinkAnimationEntry;
+
+				if (files.length === 1) {
+					// Single file with both header and data
+					const result = parseAnimationFromC(fileContents[0]);
+					if (result.type !== "link") {
+						throw new Error(
+							"Expected Link animation format with LinkAnimationHeader",
+						);
+					}
+					animation = result;
+				} else if (files.length === 2) {
+					// Two separate files - need to determine which is which
+					const file1 = fileContents[0];
+					const file2 = fileContents[1];
+
+					const hasHeader1 = /LinkAnimationHeader/.test(file1);
+					const hasHeader2 = /LinkAnimationHeader/.test(file2);
+					const hasData1 = /s16\s+\w+\s*\[\s*\]\s*=/.test(file1);
+					const hasData2 = /s16\s+\w+\s*\[\s*\]\s*=/.test(file2);
+
+					if (hasHeader1 && hasData2) {
+						animation = combineLinkAnimationFiles(file2, file1);
+					} else if (hasHeader2 && hasData1) {
+						animation = combineLinkAnimationFiles(file1, file2);
+					} else {
+						throw new Error(
+							"Could not determine which file contains header and which contains data. Expected one file with LinkAnimationHeader and another with s16 array.",
+						);
+					}
+				} else {
+					throw new Error("Please provide 1 or 2 files");
+				}
+
+				// Use the provided path instead of the animation name
+				animation.name = path.split("/").pop() || animation.name;
+				const folderPath = path.substring(0, path.lastIndexOf("/"));
+
+				// Convert to binary format
+				const { headerBlob, dataBlob, dataPath } = splitLinkAnimationToBlobs(
+					animation,
+					folderPath,
+				);
+
+				// Create ResourceEntry objects
+				const headerData = new Uint8Array(await headerBlob.arrayBuffer());
+				const dataData = new Uint8Array(await dataBlob.arrayBuffer());
+
+				const headerResource: ResourceEntry = {
+					path: path,
+					header: {
+						endianness: 0,
+						isCustom: false,
+						resourceType: "Animation",
+						resourceVersion: 0,
+						uniqueId: BigInt("0xdeadbeefdeadbeef"),
+					},
+					data: headerData,
+					dataWithoutHeader: headerData.slice(64),
+				};
+
+				const dataResource: ResourceEntry = {
+					path: dataPath,
+					header: {
+						endianness: 0,
+						isCustom: false,
+						resourceType: "Player Animation",
+						resourceVersion: 0,
+						uniqueId: BigInt("0xdeadbeefdeadbeef"),
+					},
+					data: dataData,
+					dataWithoutHeader: dataData.slice(64),
+				};
+
+				// Add to workspace
+				handleAddToWorkspace(headerResource, [dataResource]);
+
+				// Close dialog
+				setCreatePlayerAnimDialog(false);
+			} catch (err) {
+				setError(
+					err instanceof Error
+						? err.message
+						: "Failed to create player animation",
+				);
+				console.error("Error creating player animation:", err);
+			}
+		},
+		[handleAddToWorkspace],
+	);
+
 	const handleRemoveFile = useCallback(
 		(fileIndex: number) => {
 			setO2rFiles((prev) => prev.filter((_, index) => index !== fileIndex));
@@ -447,6 +553,7 @@ export default function Home() {
 						document.getElementById("add-file-input")?.click()
 					}
 					onExportClick={handleExportWorkspace}
+					onCreatePlayerAnimation={() => setCreatePlayerAnimDialog(true)}
 					workspaceResourceCount={workspaceResources.length}
 				/>
 				<input
@@ -509,6 +616,12 @@ export default function Home() {
 				resourcePath={overwriteDialog.resource?.path || null}
 				onConfirm={handleConfirmOverwrite}
 				onCancel={() => setOverwriteDialog({ open: false, resource: null })}
+			/>
+
+			<CreatePlayerAnimationDialog
+				open={createPlayerAnimDialog}
+				onConfirm={handleCreatePlayerAnimation}
+				onCancel={() => setCreatePlayerAnimDialog(false)}
 			/>
 		</main>
 	);

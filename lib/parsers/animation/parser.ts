@@ -705,7 +705,7 @@ export function animationHeaderToBlob(
 	animation: LinkAnimationEntry,
 	dataPath: string,
 ): Blob {
-	const pathBytes = new TextEncoder().encode(dataPath);
+	const pathBytes = new TextEncoder().encode(`__OTR__${dataPath}`);
 	const totalSize = OTR_HEADER_SIZE + 10 + pathBytes.length; // 10 = 4 (version) + 2 (frameCount) + 2 (pathLength) + 2 (padding)
 	const buffer = new Uint8Array(totalSize);
 
