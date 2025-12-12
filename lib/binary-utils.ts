@@ -52,6 +52,17 @@ export function readInt16BE(data: Uint8Array, offset: number): number {
 }
 
 /**
+ * Read a signed 16-bit integer in little-endian format
+ * @param data - The byte array to read from
+ * @param offset - The offset in the array to start reading
+ * @returns The 16-bit signed integer value
+ */
+export function readInt16LE(data: Uint8Array, offset: number): number {
+	const value = data[offset] | (data[offset + 1] << 8);
+	return value > 0x7fff ? value - 0x10000 : value;
+}
+
+/**
  * Write an unsigned 32-bit integer in little-endian format
  * @param data - The byte array to write to
  * @param offset - The offset in the array to start writing

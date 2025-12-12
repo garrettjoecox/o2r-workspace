@@ -1,7 +1,7 @@
 // Animation parser for Ocarina of Time / Majora's Mask animations
 
 import {
-	readInt16BE,
+	readInt16LE,
 	readUInt16LE,
 	readUInt32LE,
 	writeInt16LE,
@@ -41,11 +41,11 @@ export function parseAnimationData(rawData: Uint8Array): Int16Array {
 	const dataStart = OTR_HEADER_SIZE;
 	const numValues = readUInt32LE(rawData, dataStart); // Number of s16 values
 
-	// Read s16 array data (big-endian)
+	// Read s16 array data (little-endian, matching OTR header endianness flag)
 	const animData = new Int16Array(numValues);
 
 	for (let i = 0; i < numValues; i++) {
-		animData[i] = readInt16BE(rawData, dataStart + 4 + i * 2);
+		animData[i] = readInt16LE(rawData, dataStart + 4 + i * 2);
 	}
 
 	return animData;
@@ -666,13 +666,9 @@ export function linkAnimationDataToBlob(animation: LinkAnimationEntry): Blob {
 	// Write data count (number of s16 values, not bytes)
 	writeUInt32LE(buffer, OTR_HEADER_SIZE, animation.data.length);
 
-	// Write animation data as big-endian s16 values (matching parseAnimationData)
+	// Write animation data as little-endian s16 values (matching OTR header endianness flag)
 	for (let i = 0; i < animation.data.length; i++) {
-		// Need to write as big-endian to match how we read it
-		const value = animation.data[i];
-		const offset = OTR_HEADER_SIZE + 4 + i * 2;
-		buffer[offset] = (value >> 8) & 0xff; // High byte
-		buffer[offset + 1] = value & 0xff; // Low byte
+		writeInt16LE(buffer, OTR_HEADER_SIZE + 4 + i * 2, animation.data[i]);
 	}
 
 	return new Blob([buffer], { type: "application/octet-stream" });
