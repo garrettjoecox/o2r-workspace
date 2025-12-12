@@ -1,6 +1,13 @@
 // O2R (OTR Archive) parser for reading Ship of Harkinian resource files
 
-import { fourCCToString, readUInt32LE, readUInt64LE } from "@/lib/binary-utils";
+import {
+	fourCCToString,
+	readUInt32LE,
+	readUInt64LE,
+	stringToFourCC,
+	writeUInt32LE,
+	writeUInt64LE,
+} from "@/lib/binary-utils";
 import { OTR_HEADER_SIZE, RESOURCE_TYPE_MAP } from "@/lib/constants/binary";
 import type { ResourceEntry, ResourceHeader } from "@/lib/types";
 
@@ -173,4 +180,82 @@ export async function exportO2RArchive(
 	a.click();
 	document.body.removeChild(a);
 	URL.revokeObjectURL(url);
+}
+
+/**
+ * Create a resource header byte array
+ */
+export function createResourceHeader(
+	resourceType: string,
+	resourceVersion: number = 0,
+	uniqueId: bigint = BigInt(0),
+	isCustom: boolean = false,
+	endianness: number = 0,
+): Uint8Array {
+	const header = new Uint8Array(OTR_HEADER_SIZE);
+
+	// Byte 0: endianness
+	header[0] = endianness;
+
+	// Byte 1: isCustom flag
+	header[1] = isCustom ? 1 : 0;
+
+	// Bytes 2-3: reserved (padding)
+	header[2] = 0;
+	header[3] = 0;
+
+	// Bytes 4-7: resource type (FourCC)
+	writeUInt32LE(header, 4, stringToFourCC(resourceType));
+
+	// Bytes 8-11: resource version
+	writeUInt32LE(header, 8, resourceVersion);
+
+	// Bytes 12-19: unique ID (64-bit)
+	writeUInt64LE(header, 12, uniqueId);
+
+	// Bytes 20-63: reserved (padding)
+	for (let i = 20; i < OTR_HEADER_SIZE; i++) {
+		header[i] = 0;
+	}
+
+	return header;
+}
+
+/**
+ * Create a complete resource from header parameters and data
+ */
+export function createResource(
+	path: string,
+	resourceType: string,
+	dataWithoutHeader: Uint8Array,
+	resourceVersion: number = 0,
+	uniqueId: bigint = BigInt(0),
+	isCustom: boolean = false,
+	endianness: number = 0,
+): ResourceEntry {
+	const header = createResourceHeader(
+		resourceType,
+		resourceVersion,
+		uniqueId,
+		isCustom,
+		endianness,
+	);
+
+	// Combine header and data
+	const data = new Uint8Array(header.length + dataWithoutHeader.length);
+	data.set(header, 0);
+	data.set(dataWithoutHeader, header.length);
+
+	return {
+		path,
+		header: {
+			endianness,
+			isCustom,
+			resourceType: RESOURCE_TYPE_MAP[resourceType] || resourceType,
+			resourceVersion,
+			uniqueId,
+		},
+		data,
+		dataWithoutHeader,
+	};
 }

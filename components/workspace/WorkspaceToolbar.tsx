@@ -1,4 +1,4 @@
-import { Download, Plus, Upload, User } from "lucide-react";
+import { Download, FileCode, Plus, Upload, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
 	DropdownMenu,
@@ -13,6 +13,7 @@ interface WorkspaceToolbarProps {
 	onUploadClick: () => void;
 	onExportClick: () => void;
 	onCreatePlayerAnimation: () => void;
+	onCreateGenericResource: () => void;
 	workspaceResourceCount: number;
 }
 
@@ -20,6 +21,7 @@ export function WorkspaceToolbar({
 	onUploadClick,
 	onExportClick,
 	onCreatePlayerAnimation,
+	onCreateGenericResource,
 	workspaceResourceCount,
 }: WorkspaceToolbarProps) {
 	return (
@@ -37,6 +39,10 @@ export function WorkspaceToolbar({
 						<DropdownMenuItem onClick={onCreatePlayerAnimation}>
 							<User className="h-4 w-4 mr-2" />
 							Player Animation
+						</DropdownMenuItem>
+						<DropdownMenuItem onClick={onCreateGenericResource}>
+							<FileCode className="h-4 w-4 mr-2" />
+							Generic Resource
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>

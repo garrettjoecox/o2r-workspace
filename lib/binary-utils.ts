@@ -80,6 +80,23 @@ export function writeUInt32LE(
 }
 
 /**
+ * Write an unsigned 64-bit integer in little-endian format
+ * @param data - The byte array to write to
+ * @param offset - The offset in the array to start writing
+ * @param value - The value to write as BigInt
+ */
+export function writeUInt64LE(
+	data: Uint8Array,
+	offset: number,
+	value: bigint,
+): void {
+	const low = Number(value & BigInt(0xffffffff));
+	const high = Number((value >> BigInt(32)) & BigInt(0xffffffff));
+	writeUInt32LE(data, offset, low);
+	writeUInt32LE(data, offset + 4, high);
+}
+
+/**
  * Write an unsigned 16-bit integer in little-endian format
  * @param data - The byte array to write to
  * @param offset - The offset in the array to start writing

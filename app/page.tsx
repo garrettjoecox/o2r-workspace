@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { CreateGenericResourceDialog } from "@/components/dialogs/CreateGenericResourceDialog";
 import { CreatePlayerAnimationDialog } from "@/components/dialogs/CreatePlayerAnimationDialog";
 import { OverwriteDialog } from "@/components/dialogs/OverwriteDialog";
 import { ErrorBoundary } from "@/components/error-boundary";
@@ -18,7 +19,11 @@ import {
 	splitLinkAnimationToBlobs,
 	updateAnimationHeaderPath,
 } from "@/lib/parsers/animation";
-import { exportO2RArchive, parseO2RArchive } from "@/lib/parsers/o2r";
+import {
+	createResource,
+	exportO2RArchive,
+	parseO2RArchive,
+} from "@/lib/parsers/o2r";
 import type { LinkAnimationEntry, ResourceEntry } from "@/lib/types";
 
 export interface O2RFile {
@@ -45,6 +50,8 @@ export default function Home() {
 		additionalResources?: ResourceEntry[];
 	}>({ open: false, resource: null });
 	const [createPlayerAnimDialog, setCreatePlayerAnimDialog] = useState(false);
+	const [createGenericResourceDialog, setCreateGenericResourceDialog] =
+		useState(false);
 
 	// Currently disabled, too buggy
 	// Load workspace from localStorage on mount
@@ -354,6 +361,49 @@ export default function Home() {
 		[handleAddToWorkspace],
 	);
 
+	const handleCreateGenericResource = useCallback(
+		async (
+			path: string,
+			resourceType: string,
+			file: File,
+			resourceVersion: number,
+			uniqueId: bigint,
+			isCustom: boolean,
+		) => {
+			setError(null);
+
+			try {
+				// Read file contents
+				const arrayBuffer = await file.arrayBuffer();
+				const dataWithoutHeader = new Uint8Array(arrayBuffer);
+
+				// Create the resource with header
+				const resource = createResource(
+					path,
+					resourceType,
+					dataWithoutHeader,
+					resourceVersion,
+					uniqueId,
+					isCustom,
+				);
+
+				// Add to workspace
+				handleAddToWorkspace(resource);
+
+				// Close dialog
+				setCreateGenericResourceDialog(false);
+			} catch (err) {
+				setError(
+					err instanceof Error
+						? err.message
+						: "Failed to create generic resource",
+				);
+				console.error("Error creating generic resource:", err);
+			}
+		},
+		[handleAddToWorkspace],
+	);
+
 	const handleRemoveFile = useCallback(
 		(fileIndex: number) => {
 			setO2rFiles((prev) => prev.filter((_, index) => index !== fileIndex));
@@ -554,6 +604,7 @@ export default function Home() {
 					}
 					onExportClick={handleExportWorkspace}
 					onCreatePlayerAnimation={() => setCreatePlayerAnimDialog(true)}
+					onCreateGenericResource={() => setCreateGenericResourceDialog(true)}
 					workspaceResourceCount={workspaceResources.length}
 				/>
 				<input
@@ -622,6 +673,12 @@ export default function Home() {
 				open={createPlayerAnimDialog}
 				onConfirm={handleCreatePlayerAnimation}
 				onCancel={() => setCreatePlayerAnimDialog(false)}
+			/>
+
+			<CreateGenericResourceDialog
+				open={createGenericResourceDialog}
+				onConfirm={handleCreateGenericResource}
+				onCancel={() => setCreateGenericResourceDialog(false)}
 			/>
 		</main>
 	);
