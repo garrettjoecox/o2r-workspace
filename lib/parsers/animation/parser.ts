@@ -1,82 +1,33 @@
 // Animation parser for Ocarina of Time / Majora's Mask animations
 
-export type AnimationType = "link" | "actor";
+import {
+	readInt16BE,
+	readUInt16LE,
+	readUInt32LE,
+	writeInt16LE,
+	writeUInt16LE,
+	writeUInt32LE,
+} from "@/lib/binary-utils";
+import { OTR_HEADER_SIZE } from "@/lib/constants/binary";
+import type {
+	ActorAnimationEntry,
+	AnimationEntry,
+	AnimationFile,
+	AnimationType,
+	JointIndex,
+	LinkAnimationEntry,
+	ResourceEntry,
+} from "@/lib/types";
 
-export interface JointIndex {
-	x: number;
-	y: number;
-	z: number;
-}
-
-export interface LinkAnimationEntry {
-	type: "link";
-	name: string;
-	frameCount: number;
-	data: Int16Array;
-}
-
-export interface ActorAnimationEntry {
-	type: "actor";
-	name: string;
-	frameCount: number;
-	frameData: Int16Array;
-	jointIndices: JointIndex[];
-	staticIndexMax: number;
-}
-
-export type AnimationEntry = LinkAnimationEntry | ActorAnimationEntry;
-
-export interface AnimationFile {
-	header: Uint8Array;
-	animations: AnimationEntry[];
-}
-
-// OTR Header constants
-const OTR_HEADER_SIZE = 64;
-const MNAO_MAGIC = "MNAO"; // Animation header file magic
-const MAPO_MAGIC = "MAPO"; // Animation data file magic
-
-function readUInt32LE(data: Uint8Array, offset: number): number {
-	return (
-		data[offset] |
-		(data[offset + 1] << 8) |
-		(data[offset + 2] << 16) |
-		(data[offset + 3] << 24)
-	);
-}
-
-function readUInt16LE(data: Uint8Array, offset: number): number {
-	return data[offset] | (data[offset + 1] << 8);
-}
-
-function writeUInt32LE(data: Uint8Array, offset: number, value: number): void {
-	data[offset] = value & 0xff;
-	data[offset + 1] = (value >> 8) & 0xff;
-	data[offset + 2] = (value >> 16) & 0xff;
-	data[offset + 3] = (value >> 24) & 0xff;
-}
-
-function writeUInt16LE(data: Uint8Array, offset: number, value: number): void {
-	data[offset] = value & 0xff;
-	data[offset + 1] = (value >> 8) & 0xff;
-}
-
-function writeInt16LE(data: Uint8Array, offset: number, value: number): void {
-	const unsigned = value < 0 ? value + 0x10000 : value;
-	data[offset] = unsigned & 0xff;
-	data[offset + 1] = (unsigned >> 8) & 0xff;
-}
-
-function readInt16BE(data: Uint8Array, offset: number): number {
-	const value = (data[offset] << 8) | data[offset + 1];
-	return value > 0x7fff ? value - 0x10000 : value;
-}
-
-function writeInt16BE(data: Uint8Array, offset: number, value: number): void {
-	const unsigned = value < 0 ? value + 0x10000 : value;
-	data[offset] = (unsigned >> 8) & 0xff;
-	data[offset + 1] = unsigned & 0xff;
-}
+export type {
+	ActorAnimationEntry,
+	AnimationEntry,
+	AnimationFile,
+	AnimationType,
+	JointIndex,
+	LinkAnimationEntry,
+	ResourceEntry,
+};
 
 /**
  * Parse animation data from binary format (MAPO file)
@@ -84,14 +35,6 @@ function writeInt16BE(data: Uint8Array, offset: number, value: number): void {
 export function parseAnimationData(rawData: Uint8Array): Int16Array {
 	if (rawData.length < OTR_HEADER_SIZE + 8) {
 		throw new Error("File too small to be valid animation data");
-	}
-
-	// Verify MAPO magic
-	const magic = String.fromCharCode(...rawData.slice(8, 12));
-	if (magic !== MAPO_MAGIC) {
-		throw new Error(
-			`Invalid animation data file (expected ${MAPO_MAGIC}, got ${magic})`,
-		);
 	}
 
 	// Animation data starts after 64-byte header
@@ -119,17 +62,9 @@ export function parseAnimationHeader(rawData: Uint8Array): {
 		throw new Error("File too small to be valid animation header");
 	}
 
-	// Verify MNAO magic
-	const magic = String.fromCharCode(...rawData.slice(8, 12));
-	if (magic !== MNAO_MAGIC) {
-		throw new Error(
-			`Invalid animation header file (expected ${MNAO_MAGIC}, got ${magic})`,
-		);
-	}
-
 	// Read header data
 	const offset = OTR_HEADER_SIZE;
-	const version = readUInt32LE(rawData, offset);
+	readUInt32LE(rawData, offset); // version (unused)
 	const frameCount = readUInt16LE(rawData, offset + 4);
 	const pathLength = readUInt16LE(rawData, offset + 6);
 	// 2 bytes of padding/alignment at offset + 8 to offset + 9
@@ -140,6 +75,42 @@ export function parseAnimationHeader(rawData: Uint8Array): {
 	const dataPath = new TextDecoder().decode(pathData);
 
 	return { frameCount, dataPath };
+}
+
+/**
+ * Update the data path in a Link animation header file
+ */
+export function updateAnimationHeaderPath(
+	rawData: Uint8Array,
+	newDataPath: string,
+): Uint8Array {
+	if (rawData.length < OTR_HEADER_SIZE + 8) {
+		throw new Error("File too small to be valid animation header");
+	}
+
+	// Parse existing header to get frame count
+	const offset = OTR_HEADER_SIZE;
+	const version = readUInt32LE(rawData, offset);
+	const frameCount = readUInt16LE(rawData, offset + 4);
+
+	// Encode new path
+	const pathBytes = new TextEncoder().encode(newDataPath);
+	const totalSize = OTR_HEADER_SIZE + 10 + pathBytes.length;
+	const buffer = new Uint8Array(totalSize);
+
+	// Copy the OTR header (first 64 bytes)
+	buffer.set(rawData.slice(0, OTR_HEADER_SIZE));
+
+	// Write header data with new path
+	writeUInt32LE(buffer, offset, version);
+	writeUInt16LE(buffer, offset + 4, frameCount);
+	writeUInt16LE(buffer, offset + 6, pathBytes.length);
+	// 2 bytes of padding/alignment at offset + 8 to offset + 9 (already zeroed)
+
+	// Write new path string
+	buffer.set(pathBytes, offset + 10);
+
+	return buffer;
 }
 
 /**
@@ -198,8 +169,10 @@ export function parseLinkAnimationHeaderFromC(
 export function parseActorFrameDataFromC(
 	cSource: string,
 ): { dataArrayName: string; data: Int16Array } | null {
-	// Extract array name and data
-	const arrayMatch = cSource.match(/s16\s+(\w+)\s*\[\s*\]\s*=\s*\{([^}]+)\}/);
+	// Extract array name and data (matches both [] and [size])
+	const arrayMatch = cSource.match(
+		/s16\s+(\w+)\s*\[\s*\d*\s*\]\s*=\s*\{([^}]+)\}/,
+	);
 	if (!arrayMatch) {
 		return null;
 	}
@@ -227,9 +200,10 @@ export function parseActorFrameDataFromC(
 export function parseActorJointIndicesFromC(
 	cSource: string,
 ): { indicesArrayName: string; indices: JointIndex[] } | null {
-	// Extract array name and data
+	// Extract array name and data (matches both [] and [size])
+	// Use [\s\S] to match across newlines and handle nested braces
 	const arrayMatch = cSource.match(
-		/JointIndex\s+(\w+)\s*\[\s*\]\s*=\s*\{([^}]+)\}/,
+		/JointIndex\s+(\w+)\s*\[\s*\d*\s*\]\s*=\s*\{([\s\S]+?)\};/,
 	);
 	if (!arrayMatch) {
 		return null;
@@ -262,9 +236,7 @@ export function parseActorJointIndicesFromC(
 /**
  * Parse Actor animation header from C source code
  */
-export function parseActorAnimationHeaderFromC(
-	cSource: string,
-): {
+export function parseActorAnimationHeaderFromC(cSource: string): {
 	animName: string;
 	frameCount: number;
 	frameDataName: string;
@@ -561,10 +533,7 @@ export function animationToC(animation: AnimationEntry): string {
 /**
  * Convert animation data to binary format (MAPO file for Link, or ANIM file for Actor)
  */
-export function animationDataToBlob(
-	animation: AnimationEntry,
-	dataFileName: string,
-): Blob {
+export function animationDataToBlob(animation: AnimationEntry): Blob {
 	if (animation.type === "link") {
 		// Link animation - MAPO format
 		const dataSize = animation.data.length * 2;
@@ -665,8 +634,72 @@ export function animationDataToBlob(
 }
 
 /**
+ * Convert Link animation data to binary format (MAPO file only, without header)
+ */
+export function linkAnimationDataToBlob(animation: LinkAnimationEntry): Blob {
+	const dataSize = animation.data.length * 2;
+	const totalSize = OTR_HEADER_SIZE + 4 + dataSize;
+	const buffer = new Uint8Array(totalSize);
+
+	// Write OTR header (first 64 bytes)
+	buffer.fill(0, 0, 64);
+
+	// Byte 0: Endianness (0 = little-endian)
+	buffer[0] = 0;
+	// Byte 1: IsCustom (0 = false)
+	buffer[1] = 0;
+	// Bytes 2-3: Unused
+	buffer[2] = 0;
+	buffer[3] = 0;
+
+	// Bytes 4-7: Resource Type as UInt32
+	// "MAPO" = 0x4F50414D in little-endian
+	writeUInt32LE(buffer, 4, 0x4f50414d);
+
+	// Bytes 8-11: Resource Version (0)
+	writeUInt32LE(buffer, 8, 0);
+
+	// Bytes 12-19: Unique ID (0xdeadbeefdeadbeef)
+	writeUInt32LE(buffer, 12, 0xdeadbeef);
+	writeUInt32LE(buffer, 16, 0xdeadbeef);
+
+	// Write data count (number of s16 values, not bytes)
+	writeUInt32LE(buffer, OTR_HEADER_SIZE, animation.data.length);
+
+	// Write animation data as big-endian s16 values (matching parseAnimationData)
+	for (let i = 0; i < animation.data.length; i++) {
+		// Need to write as big-endian to match how we read it
+		const value = animation.data[i];
+		const offset = OTR_HEADER_SIZE + 4 + i * 2;
+		buffer[offset] = (value >> 8) & 0xff; // High byte
+		buffer[offset + 1] = value & 0xff; // Low byte
+	}
+
+	return new Blob([buffer], { type: "application/octet-stream" });
+}
+
+/**
+ * Split a Link animation into header and data blobs for saving
+ * Returns both the header blob (MNAO) and data blob (MAPO)
+ */
+export function splitLinkAnimationToBlobs(
+	animation: LinkAnimationEntry,
+	dataPathPrefix: string,
+): { headerBlob: Blob; dataBlob: Blob; dataPath: string } {
+	// Generate data path like "__OTR__misc/link_animation/gPlayerAnimData_..."
+	const dataPath = `${dataPathPrefix}/${animation.name}_Data`;
+
+	return {
+		headerBlob: animationHeaderToBlob(animation, dataPath),
+		dataBlob: linkAnimationDataToBlob(animation),
+		dataPath,
+	};
+}
+
+/**
  * Convert Link animation to binary header format (MNAO file)
  * Note: Actor animations don't use separate header files
+ * @deprecated Use splitLinkAnimationToBlobs instead for better control
  */
 export function animationHeaderToBlob(
 	animation: LinkAnimationEntry,
@@ -720,4 +753,170 @@ export function generateAnimationPreview(animation: AnimationEntry): string {
 	} else {
 		return `${animation.name} (Actor, ${animation.frameCount} frames, ${animation.frameData.length} values, ${animation.jointIndices.length} joints)`;
 	}
+}
+
+/**
+ * Parse Link animation from header resource and find corresponding data
+ */
+function parseLinkAnimationFromHeader(
+	headerResource: ResourceEntry,
+	relatedResources: ResourceEntry[],
+): LinkAnimationEntry {
+	// Parse the header
+	const { frameCount, dataPath } = parseAnimationHeader(headerResource.data);
+
+	// Find the corresponding data file
+	// The dataPath is something like "__OTR__misc/link_animation/gPlayerAnimData_1B4B00"
+	// We need to find a resource with a matching path
+	const dataResource = relatedResources.find((r) => {
+		// Remove __OTR__ prefix if present
+		const normalizedDataPath = dataPath.replace(/^__OTR__/, "");
+		const normalizedResourcePath = r.path.replace(/^__OTR__/, "");
+		return normalizedResourcePath === normalizedDataPath;
+	});
+
+	if (!dataResource) {
+		throw new Error(
+			`Could not find data file for Link animation. Expected path: ${dataPath}`,
+		);
+	}
+
+	// Parse the animation data
+	const animData = parseAnimationData(dataResource.data);
+
+	// Extract animation name from header resource path
+	const pathParts = headerResource.path.split("/");
+	const name = pathParts[pathParts.length - 1].replace(/\.(o2r|otr)$/, "");
+
+	return {
+		type: "link",
+		name,
+		frameCount,
+		data: animData,
+	};
+}
+
+/**
+ * Parse animation from binary resource format
+ * This works with the OTR resource format used in the o2r files
+ * For Type 1 (Link) animations, you need both the header and data resources
+ */
+export function parseAnimationFromResource(
+	resource: ResourceEntry,
+	relatedResources?: ResourceEntry[],
+): AnimationEntry {
+	const data = resource.dataWithoutHeader;
+	let offset = 0;
+
+	// Read AnimationType (uint32)
+	const animType = readUInt32LE(data, offset);
+	offset += 4;
+
+	// Type 1 = Link animations (require both header and data files)
+	if (animType === 1) {
+		return parseLinkAnimationFromHeader(resource, relatedResources || []);
+	}
+
+	// Type 0 = Actor/Normal animations (single file)
+
+	// Read frame count (int16)
+	const frameCount = readUInt16LE(data, offset);
+	offset += 2;
+
+	// Read rotation values count (uint32)
+	const rotValuesCnt = readUInt32LE(data, offset);
+	offset += 4;
+
+	// Read rotation values (uint16 array)
+	const frameData = new Int16Array(rotValuesCnt);
+	for (let i = 0; i < rotValuesCnt; i++) {
+		frameData[i] = readUInt16LE(data, offset);
+		offset += 2;
+	}
+
+	// Read rotation indices count (uint32)
+	const rotIndCnt = readUInt32LE(data, offset);
+	offset += 4;
+
+	// Read joint indices (3 x uint16 per joint)
+	const jointIndices: JointIndex[] = [];
+	for (let i = 0; i < rotIndCnt; i++) {
+		jointIndices.push({
+			x: readUInt16LE(data, offset),
+			y: readUInt16LE(data, offset + 2),
+			z: readUInt16LE(data, offset + 4),
+		});
+		offset += 6;
+	}
+
+	// Read staticIndexMax (int16)
+	const staticIndexMax = readUInt16LE(data, offset);
+
+	// Extract animation name from path
+	const pathParts = resource.path.split("/");
+	const name = pathParts[pathParts.length - 1].replace(/\.(o2r|otr)$/, "");
+
+	return {
+		type: "actor",
+		name,
+		frameCount,
+		frameData,
+		jointIndices,
+		staticIndexMax,
+	};
+}
+
+/**
+ * Convert animation to binary resource format
+ * This creates the binary data that can replace the resource's dataWithoutHeader
+ */
+export function animationToResourceBinary(
+	animation: ActorAnimationEntry,
+): Uint8Array {
+	// Calculate size
+	// AnimationType (4) + frameCount (2) + rotValuesCnt (4) + rotation values (n*2) + rotIndCnt (4) + joint indices (n*6) + staticIndexMax (2)
+	const rotValuesSize = animation.frameData.length * 2;
+	const jointIndicesSize = animation.jointIndices.length * 6;
+	const totalSize = 4 + 2 + 4 + rotValuesSize + 4 + jointIndicesSize + 2;
+
+	const buffer = new Uint8Array(totalSize);
+	let offset = 0;
+
+	// Write AnimationType (uint32) - 0 for Normal/Actor animation
+	writeUInt32LE(buffer, offset, 0);
+	offset += 4;
+
+	// Write frame count (int16 as uint16)
+	writeUInt16LE(buffer, offset, animation.frameCount);
+	offset += 2;
+
+	// Write rotation values count (uint32)
+	writeUInt32LE(buffer, offset, animation.frameData.length);
+	offset += 4;
+
+	// Write rotation values (uint16 array)
+	for (let i = 0; i < animation.frameData.length; i++) {
+		// Store as uint16 (matching game's ReadUInt16)
+		writeUInt16LE(buffer, offset, animation.frameData[i] & 0xffff);
+		offset += 2;
+	}
+
+	// Write rotation indices count (uint32)
+	writeUInt32LE(buffer, offset, animation.jointIndices.length);
+	offset += 4;
+
+	// Write joint indices (3 x uint16 per joint)
+	for (const joint of animation.jointIndices) {
+		writeUInt16LE(buffer, offset, joint.x);
+		offset += 2;
+		writeUInt16LE(buffer, offset, joint.y);
+		offset += 2;
+		writeUInt16LE(buffer, offset, joint.z);
+		offset += 2;
+	}
+
+	// Write staticIndexMax (int16 as uint16)
+	writeUInt16LE(buffer, offset, animation.staticIndexMax);
+
+	return buffer;
 }

@@ -1,81 +1,23 @@
 // O2R (OTR Archive) parser for reading Ship of Harkinian resource files
 
-export interface ResourceHeader {
-	endianness: number;
-	isCustom: boolean;
-	resourceType: string;
-	resourceVersion: number;
-	uniqueId: bigint;
-}
+import { fourCCToString, readUInt32LE, readUInt64LE } from "@/lib/binary-utils";
+import { OTR_HEADER_SIZE, RESOURCE_TYPE_MAP } from "@/lib/constants/binary";
+import type { ResourceEntry, ResourceHeader } from "@/lib/types";
 
-export interface ResourceEntry {
-	path: string;
-	header: ResourceHeader;
-	data: Uint8Array; // Full resource data including header
-	dataWithoutHeader: Uint8Array; // Data after the 64-byte header
-}
-
-const OTR_HEADER_SIZE = 64;
+export type { ResourceEntry, ResourceHeader };
 
 /**
- * Read a UInt32 in little-endian format
+ * Convert resource type bytes to string, returns null for unknown types
  */
-function readUInt32LE(data: Uint8Array, offset: number): number {
-	return (
-		data[offset] |
-		(data[offset + 1] << 8) |
-		(data[offset + 2] << 16) |
-		(data[offset + 3] << 24)
-	);
-}
-
-/**
- * Read a UInt64 in little-endian format as BigInt
- */
-function readUInt64LE(data: Uint8Array, offset: number): bigint {
-	const low = BigInt(readUInt32LE(data, offset));
-	const high = BigInt(readUInt32LE(data, offset + 4));
-	return (high << BigInt(32)) | low;
-}
-
-/**
- * Convert resource type bytes to string
- */
-function resourceTypeToString(typeValue: number): string {
-	// Resource type is stored as a 4-byte value
-	// Convert to string representation
-	const byte1 = String.fromCharCode((typeValue >> 0) & 0xff);
-	const byte2 = String.fromCharCode((typeValue >> 8) & 0xff);
-	const byte3 = String.fromCharCode((typeValue >> 16) & 0xff);
-	const byte4 = String.fromCharCode((typeValue >> 24) & 0xff);
-
-	const typeStr = byte1 + byte2 + byte3 + byte4;
-
-	// Map known types to readable names
-	const typeMap: Record<string, string> = {
-		MAPO: "Animation Data (Link)",
-		MNAO: "Animation Header (Link)",
-		ANIM: "Animation (Actor)",
-		MSGT: "Message Table",
-		TEXT: "Text",
-		BLOB: "Binary Data",
-		MTEX: "Texture",
-		VTEX: "Vertex Texture",
-		SKEL: "Skeleton",
-		ROOM: "Room",
-		SCEN: "Scene",
-		COLL: "Collision",
-		PATH: "Path",
-		RLUT: "Resource LUT",
-	};
-
-	return typeMap[typeStr] || typeStr;
+function resourceTypeToString(typeValue: number): string | null {
+	const typeStr = fourCCToString(typeValue);
+	return RESOURCE_TYPE_MAP[typeStr] || null;
 }
 
 /**
  * Parse the OTR header from resource data
  */
-export function parseResourceHeader(data: Uint8Array): ResourceHeader {
+export function parseResourceHeader(data: Uint8Array): ResourceHeader | null {
 	if (data.length < OTR_HEADER_SIZE) {
 		throw new Error(
 			`Data too small for OTR header (need ${OTR_HEADER_SIZE} bytes, got ${data.length})`,
@@ -87,6 +29,11 @@ export function parseResourceHeader(data: Uint8Array): ResourceHeader {
 	const resourceType = resourceTypeToString(readUInt32LE(data, 4));
 	const resourceVersion = readUInt32LE(data, 8);
 	const uniqueId = readUInt64LE(data, 12);
+
+	// Return null if resource type is not recognized
+	if (!resourceType) {
+		return null;
+	}
 
 	return {
 		endianness,
@@ -120,12 +67,18 @@ export async function parseO2RArchive(file: File): Promise<ResourceEntry[]> {
 
 			// Skip files that are too small to have a header
 			if (data.length < OTR_HEADER_SIZE) {
-				console.warn(`Skipping ${path}: too small for OTR header`);
+				// console.warn(`Skipping ${path}: too small for OTR header`);
 				continue;
 			}
 
 			// Parse the header
 			const header = parseResourceHeader(data);
+
+			// Skip resources with unrecognized types
+			if (!header) {
+				// console.warn(`Skipping ${path}: unrecognized resource type`);
+				continue;
+			}
 
 			// Extract data without header
 			const dataWithoutHeader = data.slice(OTR_HEADER_SIZE);
@@ -188,4 +141,36 @@ export function formatHexData(
 	}
 
 	return lines.join("\n");
+}
+
+/**
+ * Export resources as an O2R archive (ZIP file)
+ */
+export async function exportO2RArchive(
+	resources: ResourceEntry[],
+	filename: string = "workspace.o2r",
+): Promise<void> {
+	// Dynamically import JSZip
+	const JSZip = (await import("jszip")).default;
+
+	const zip = new JSZip();
+
+	// Add each resource to the ZIP
+	for (const resource of resources) {
+		// Use the full resource data (including header)
+		zip.file(resource.path, resource.data);
+	}
+
+	// Generate the ZIP file
+	const blob = await zip.generateAsync({ type: "blob" });
+
+	// Create download link
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement("a");
+	a.href = url;
+	a.download = filename;
+	document.body.appendChild(a);
+	a.click();
+	document.body.removeChild(a);
+	URL.revokeObjectURL(url);
 }
